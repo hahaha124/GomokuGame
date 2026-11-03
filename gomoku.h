@@ -1,104 +1,137 @@
 #ifndef GOMOKU_H
 #define GOMOKU_H
-
-#include <QWidget>
-#include <QPainter>
-#include <QMouseEvent>
-#include <QPushButton>
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QLabel>
+#include <QObject>
 #include <QVector>
 #include <QPoint>
-#include <QMessageBox>
-#include <QRandomGenerator>
-#include <algorithm>
-#include <QTimer>
+#include <QSet>
+#include <array>
 
-// 棋子颜色：EMPTY=空  BLACK=黑  WHITE=白
-enum Stone { EMPTY, BLACK, WHITE };
+// ============ 公共枚举与常量 ============
+enum Stone
+{
+    EMPTY = 0,
+    BLACK = 1,
+    WHITE = -1
+};
+enum Difficulty
+{
+    NORMAL,
+    HARD
+};
+const int BOARD_SIZE = 15;
+const int DIRS[4][2] = {{0, 1}, {1, 0}, {1, 1}, {1, -1}};
 
-class GomokuBoard : public QWidget
+// 棋型枚举
+enum PatternType {
+    NONE = 0,
+    LIVE_ONE = 1,
+    SLEEP_ONE = 2,
+    LIVE_TWO = 3,
+    SLEEP_TWO = 4,
+    LIVE_THREE = 5,
+    SLEEP_THREE = 6,
+    LIVE_FOUR = 7,
+    SLEEP_FOUR = 8,
+    FIVE = 9,
+    DOUBLE_LIVE_THREE = 10,
+    DOUBLE_FOUR = 11
+};
+
+// 棋型评分
+const int PATTERN_SCORES[] = {
+    0,      // NONE
+    10,     // LIVE_ONE
+    2,      // SLEEP_ONE
+    100,    // LIVE_TWO
+    20,     // SLEEP_TWO
+    1000,   // LIVE_THREE
+    100,    // SLEEP_THREE
+    10000,  // LIVE_FOUR
+    1000,   // SLEEP_FOUR
+    1000000, // FIVE
+    5000,   // DOUBLE_LIVE_THREE
+    10000   // DOUBLE_FOUR
+};
+
+// 搜索节点
+struct SearchNode {
+    int depth;
+    int alpha;
+    int beta;
+    int score;
+    QPoint bestMove;
+};
+
+struct MoveScore {
+    QPoint point;
+    int score;
+};
+
+class gomoku : public QObject
 {
     Q_OBJECT
 public:
-    explicit GomokuBoard(QWidget *parent = nullptr);
+    explicit gomoku(QObject *parent = nullptr);
 
-    // 对外接口
-    void newGame();          // 新游戏（随机分配黑白）
-    void undo();             // 悔棋
-    bool isPlayerTurn() const { return m_playerTurn; }
-    Stone playerColor() const { return m_playerColor; }
-    Stone aiColor() const    { return m_aiColor; }
-    Stone currentTurn() const{ return m_currentTurn; }
+    // 设置难度
+    void setDifficulty(Difficulty diff) { m_difficulty = diff; }
 
-signals:
-    void gameOver(QString result);   // 游戏结束信号
-    void turnChanged(QString info);  // 回合变化信号
-    void needAiMove();               // 请求AI落子
+    // 设置局面
+    void setBoardState(const QVector<QVector<Stone>>& board,
+                       const QVector<QPoint>& history,
+                       Stone aiColor, Stone playerColor);
 
-protected:
-    void paintEvent(QPaintEvent *event) override;
-    void mousePressEvent(QMouseEvent *event) override;
+    // 获取最佳落子
+    QPoint findBestMove();
 
-private slots:
-    void onAiMove();                 // AI落子槽
+    // ==================== 禁手检测 ====================
+    bool isForbiddenMove(int r, int c, Stone color) const;
+    bool checkDoubleLiveThree(int r, int c, Stone color) const;
+    bool checkDoubleFour(int r, int c, Stone color) const;
+    bool checkLongConnect(int r, int c, Stone color) const;
 
 private:
-    // ---- 常量 ----
-    static const int BOARD_SIZE = 15;     // 15x15 棋盘
-    static const int MARGIN     = 40;     // 边距
-    static const int CELL_SIZE  = 40;     // 格子大小
-    static const int STAR_POINTS[5];      // 星位
-
-    // ---- 数据 ----
-    QVector<QVector<Stone>> m_board;   // 棋盘二维数组
-    Stone m_playerColor;               // 玩家执棋颜色
-    Stone m_aiColor;                  // AI 执棋颜色
-    Stone m_currentTurn;              // 当前该谁下
-    bool  m_playerTurn;               // 是否轮到玩家
-    bool  m_gameOver;                 // 游戏是否结束
-    QPoint m_lastMove;                // 最后落子位置
-    QVector<QPoint> m_moveHistory;    // 落子历史（用于悔棋）
-
-    // ---- AI ----
-    QPoint findBestMove(Stone color);                      // 找最佳落子点
-    int    evaluatePoint(int r, int c, Stone color);       // 评估某个位置得分
-    void   getAllCandidateMoves(Stone color, QVector<QPoint>& candidates); // 获取候选点
-    bool   checkWin(int r, int c, Stone color);            // 检查是否获胜
-    bool   isBoardFull();                                  // 棋盘是否已满
-    bool   wouldFormFour(int r, int c, Stone color);       // 是否形成四连
-
-    // ---- 绘制 ----
-    void drawBoard(QPainter &p);
-    void drawStones(QPainter &p);
-    void drawStarPoints(QPainter &p);
-    void drawCoordinateLabels(QPainter &p);
-    QPoint gridToPixel(int r, int c) const;
-    bool pixelToGrid(const QPoint &pt, int &r, int &c) const;
+    // ==================== 普通模式 ====================
+    void getAllCandidateMoves(QVector<QPoint>& candidates);
+    bool wouldFormFour(int r, int c, Stone color) const;
+    int evaluatePoint(int r, int c, Stone color);
     int evaluateLine(int r, int c, int dr, int dc, Stone color);
-};
+    int countConsecutive(int r, int c, int dr, int dc, Stone color) const;
 
-// ============ 主窗口 ============
-class GomokuWindow : public QWidget
-{
-    Q_OBJECT
-public:
-    explicit GomokuWindow(QWidget *parent = nullptr);
+    // ==================== 困难模式：Minimax + AB剪枝 ====================
+    int negamax(int depth, int alpha, int beta, Stone color);
+    int quiescenceNegamax(int alpha, int beta, int depth, Stone color);
+    int evaluateBoardForColor(Stone color);
+    QVector<QPoint> generateOrderedMoves(Stone color);
+    int evaluateBoard(Stone perspective);
 
-private slots:
-    void onNewGame();
-    void onUndo();
-    void onGameOver(QString result);
-    void onTurnChanged(QString info);
+    // 棋型模式匹配
+    PatternType detectPattern(int r, int c, int dr, int dc, Stone color) const;
+    int countPattern(int r, int c, Stone color, PatternType pattern) const;
+
+    // 移动排序
+    void updateHistoryTable(const QPoint& move, int depth);
+    QVector<QPoint> getKillerMoves(int depth) const;
+
+    // 动态深度
+    int getDynamicDepth() const;
+
+    // 一步杀检测
+    bool hasWinningMove(Stone color, QPoint& winningMove);
 
 private:
-    GomokuBoard *m_board;
-    QLabel      *m_statusLabel;
-    QLabel      *m_turnLabel;
-    QLabel      *m_colorLabel;
-    QPushButton *m_newGameBtn;
-    QPushButton *m_undoBtn;
+    QVector<QVector<Stone>> m_board;
+    QVector<QPoint> m_moveHistory;
+    Stone m_aiColor;
+    Stone m_enemyColor;
+    Difficulty m_difficulty;
+
+    // 历史启发表 (15x15)
+    int m_historyTable[BOARD_SIZE][BOARD_SIZE];
+    // 杀手走法表 [depth][2]
+    QPoint m_killerTable[64][2];
+    int m_nodesSearched;
 };
+
 
 #endif // GOMOKU_H
