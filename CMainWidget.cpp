@@ -18,7 +18,6 @@ CMainWidget::CMainWidget(QWidget *parent) : QWidget(parent)
     m_colorLabel = new QLabel("", this);
     m_colorLabel->setAlignment(Qt::AlignCenter);
 
-    // 难度选择
     m_diffLabel = new QLabel("难度：", this);
     m_diffCombo = new QComboBox(this);
     m_diffCombo->addItem("🟢 普通", NORMAL);

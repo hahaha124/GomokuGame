@@ -62,10 +62,10 @@ struct SearchNode {
     QPoint bestMove;
 };
 
-struct MoveScore {
-    QPoint point;
-    int score;
-};
+// struct MoveScore {
+//     QPoint point;
+//     int score;
+// };
 
 class gomoku : public QObject
 {
@@ -77,9 +77,7 @@ public:
     void setDifficulty(Difficulty diff) { m_difficulty = diff; }
 
     // 设置局面
-    void setBoardState(const QVector<QVector<Stone>>& board,
-                       const QVector<QPoint>& history,
-                       Stone aiColor, Stone playerColor);
+    void setBoardState(const QVector<QVector<Stone>>& board, const QVector<QPoint>& history, Stone aiColor, Stone playerColor);
 
     // 获取最佳落子
     QPoint findBestMove();
