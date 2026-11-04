@@ -19,6 +19,7 @@
 mkdir build && cd build
 cmake ..
 cmake --build .
+(或者 make -j$(nproc))
 ./GomokuGame
 ```
 

@@ -10,7 +10,12 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 add_executable(GomokuGame
     main.cpp
     gomoku.cpp
+    CBoardView.cpp
+    CMainWidget.cpp
+    
     gomoku.h
+    CBoardView.h
+    CMainWidget.h
 )
 
 target_link_libraries(GomokuGame PRIVATE Qt6::Widgets)
