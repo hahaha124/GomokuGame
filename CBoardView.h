@@ -5,17 +5,19 @@
 #include <QObject>
 #include <QVector>
 #include <QPoint>
+#include <QThread>
 #include "gomoku.h"
 
-const int MARGIN    = 30;
 const int CELL_SIZE = 40;
-const int STAR_POINTS[] = {3, 7, 11};
+const int MARGIN = 40;
+extern const int STAR_POINTS[];
 
 class CBoardView : public QWidget
 {
     Q_OBJECT
 public:
     explicit CBoardView(QWidget *parent = nullptr);
+    ~CBoardView() override;
 
     void newGame();
     void undo();
@@ -27,6 +29,10 @@ signals:
     void gameOver(QString result);
     void turnChanged(QString info);
     void needAiMove();
+    void requestAiMove();
+
+public slots:
+    void onAiMoveCalculated(const QPoint& best);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -44,6 +50,7 @@ private:
     int countConsecutive(int r, int c, int dr, int dc, Stone color) const;
     void onAiMove();
 
+private:
     gomoku *m_ai;
     QVector<QVector<Stone>> m_board;
     QVector<QPoint> m_moveHistory;
@@ -53,6 +60,8 @@ private:
     bool  m_playerTurn;
     bool  m_gameOver;
     QPoint m_lastMove;
+    QThread* m_aiThread;
+    int m_aiRequestId;
 };
 
 #endif // CBOARDVIEW_H

@@ -5,6 +5,8 @@
 #include <QLinearGradient>
 #include <QRadialGradient>
 
+const int STAR_POINTS[] = {3, 7, 11};
+
 CBoardView::CBoardView(QWidget *parent)
     : QWidget(parent)
     , m_playerColor(EMPTY)
@@ -13,6 +15,7 @@ CBoardView::CBoardView(QWidget *parent)
     , m_playerTurn(true)
     , m_gameOver(false)
     , m_lastMove(-1, -1)
+    , m_aiRequestId(0)
 {
     setMinimumSize(MARGIN * 2 + CELL_SIZE * (BOARD_SIZE - 1) + 60,
                    MARGIN * 2 + CELL_SIZE * (BOARD_SIZE - 1) + 60);
@@ -24,13 +27,29 @@ CBoardView::CBoardView(QWidget *parent)
         m_board[i].resize(BOARD_SIZE, EMPTY);
     }
 
-    m_ai = new gomoku(this);
+    m_aiThread = new QThread(this);
+    m_ai = new gomoku();
+    m_ai->moveToThread(m_aiThread);
+    connect(m_aiThread, &QThread::finished, m_ai, &QObject::deleteLater);
+    m_aiThread->start();
+
+    connect(this, &CBoardView::requestAiMove, m_ai, &gomoku::asyncFindBestMove);
+    connect(m_ai, &gomoku::moveCalculated, this, &CBoardView::onAiMoveCalculated);
     connect(this, &CBoardView::needAiMove, this, &CBoardView::onAiMove);
+}
+
+CBoardView::~CBoardView()
+{
+    m_ai->abortCalculation();
+    m_aiThread->quit();
+    m_aiThread->wait();
 }
 
 void CBoardView::newGame()
 {
-    bool playerIsBlack = (QRandomGenerator::global()->bounded(2) == 0);
+    m_ai->abortCalculation();   // 立即通知 AI 线程终止当前计算
+
+    bool playerIsBlack = (QRandomGenerator::global()->bounded(2) == 0);     // 重置游戏状态
     if (playerIsBlack)
     {
         m_playerColor = BLACK; m_aiColor = WHITE;
@@ -57,12 +76,13 @@ void CBoardView::newGame()
                      .arg(playerIsBlack ? "黑" : "白")
                      .arg(playerIsBlack ? "你" : "电脑"));
     emit turnChanged(QString("当前回合：%1").arg(m_playerTurn ? "你的回合" : "电脑思考中..."));
-    update();
 
-    if (!m_playerTurn) 
+    if (!m_playerTurn)
     {
         emit needAiMove();
     }
+    update();
+
 }
 
 void CBoardView::undo()
@@ -93,6 +113,7 @@ void CBoardView::undo()
     m_playerTurn = true;
     m_lastMove = m_moveHistory.isEmpty() ? QPoint(-1, -1) : m_moveHistory.last();
     emit turnChanged(QString("悔棋成功，撤销了 %1 步").arg(stepsToUndo));
+    m_ai->setBoardState(m_board, m_moveHistory, m_aiColor, m_playerColor);
     update();
 }
 
@@ -136,28 +157,55 @@ void CBoardView::mousePressEvent(QMouseEvent *event)
 
 void CBoardView::onAiMove()
 {
-    if (m_gameOver || m_playerTurn) return;
+    if (m_gameOver || m_playerTurn) 
+        return;
+
+    m_aiRequestId++;
+
+    // 如果是AI先行（棋盘为空），强制下在天元
+    if (m_moveHistory.isEmpty()) 
+    {
+        int center = BOARD_SIZE / 2; 
+        onAiMoveCalculated(QPoint(center, center));
+        return;
+    } 
 
     m_ai->setBoardState(m_board, m_moveHistory, m_aiColor, m_playerColor);
-    QPoint best = m_ai->findBestMove();
+    emit requestAiMove();
+}
 
-    if (best.x() < 0 || best.y() < 0) return;
+void CBoardView::onAiMoveCalculated(const QPoint& best)
+{
+    if (m_gameOver || m_playerTurn) return;
 
-    int r = best.x(), c = best.y();
+    QPoint move = best;
+    if (move.x() < 0 || move.y() < 0 || m_board[move.x()][move.y()] != EMPTY) {
+        emit needAiMove();
+        return;
+//        // 兜底：找任意空位
+//        for (int i = 0; i < BOARD_SIZE; ++i) {
+//            for (int j = 0; j < BOARD_SIZE; ++j) {
+//                if (m_board[i][j] == EMPTY) {
+//                    move = QPoint(i, j);
+//                    goto valid;
+//                }
+//            }
+//        }
+//        return;
+    }
+valid:
+    int r = move.x(), c = move.y();
     m_board[r][c] = m_aiColor;
     m_lastMove = QPoint(r, c);
     m_moveHistory.append(QPoint(r, c));
     update();
 
-    if (checkWin(r, c, m_aiColor)) 
-    {
+    if (checkWin(r, c, m_aiColor)) {
         m_gameOver = true;
         emit gameOver("电脑赢了！再接再厉 💪");
         return;
     }
-
-    if (isBoardFull()) 
-    {
+    if (isBoardFull()) {
         m_gameOver = true;
         emit gameOver("平局！棋盘已满。");
         return;

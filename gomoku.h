@@ -1,122 +1,89 @@
 #ifndef GOMOKU_H
 #define GOMOKU_H
+
 #include <QObject>
 #include <QVector>
 #include <QPoint>
+#include <QHash>
 #include <QSet>
-#include <array>
+#include <QElapsedTimer>
+#include <QRandomGenerator>
+#include <algorithm>
+#include <climits>
 
-// ============ 公共枚举与常量 ============
-enum Stone
-{
-    EMPTY = 0,
-    BLACK = 1,
-    WHITE = -1
-};
-enum Difficulty
-{
-    NORMAL,
-    HARD
-};
+enum Stone { EMPTY = 0, BLACK = 1, WHITE = -1 };
+enum Difficulty { NORMAL, HARD };
 const int BOARD_SIZE = 15;
 const int DIRS[4][2] = {{0, 1}, {1, 0}, {1, 1}, {1, -1}};
 
-// 棋型枚举
-enum PatternType {
-    NONE = 0,
-    LIVE_ONE = 1,
-    SLEEP_ONE = 2,
-    LIVE_TWO = 3,
-    SLEEP_TWO = 4,
-    LIVE_THREE = 5,
-    SLEEP_THREE = 6,
-    LIVE_FOUR = 7,
-    SLEEP_FOUR = 8,
-    FIVE = 9,
-    DOUBLE_LIVE_THREE = 10,
-    DOUBLE_FOUR = 11
-};
-
-// 棋型评分
-const int PATTERN_SCORES[] = {
-    0,      // NONE
-    10,     // LIVE_ONE
-    2,      // SLEEP_ONE
-    100,    // LIVE_TWO
-    20,     // SLEEP_TWO
-    1000,   // LIVE_THREE
-    100,    // SLEEP_THREE
-    10000,  // LIVE_FOUR
-    1000,   // SLEEP_FOUR
-    1000000, // FIVE
-    5000,   // DOUBLE_LIVE_THREE
-    10000   // DOUBLE_FOUR
-};
-
-// 搜索节点
-struct SearchNode {
-    int depth;
-    int alpha;
-    int beta;
-    int score;
-    QPoint bestMove;
-};
-
-// struct MoveScore {
-//     QPoint point;
-//     int score;
-// };
+const int SCORE_FIVE      = 1000000;
+const int SCORE_WIN_BASE  = 1000000;
 
 class gomoku : public QObject
 {
     Q_OBJECT
 public:
     explicit gomoku(QObject *parent = nullptr);
-
-    // 设置难度
     void setDifficulty(Difficulty diff) { m_difficulty = diff; }
-
-    // 设置局面
-    void setBoardState(const QVector<QVector<Stone>>& board, const QVector<QPoint>& history, Stone aiColor, Stone playerColor);
-
-    // 获取最佳落子
+    void setBoardState(const QVector<QVector<Stone>>& board,
+                       const QVector<QPoint>& history,
+                       Stone aiColor, Stone playerColor);
     QPoint findBestMove();
+    void abortCalculation() { m_abort = true; }
 
-    // ==================== 禁手检测 ====================
-    bool isForbiddenMove(int r, int c, Stone color) const;
-    bool checkDoubleLiveThree(int r, int c, Stone color) const;
-    bool checkDoubleFour(int r, int c, Stone color) const;
-    bool checkLongConnect(int r, int c, Stone color) const;
+signals:
+    void moveCalculated(const QPoint& move);
+
+public slots:
+    void asyncFindBestMove(); 
 
 private:
-    // ==================== 普通模式 ====================
+    struct TranspositionEntry {
+        quint64 key;
+        int score;
+        int depth;
+        char bound;
+        QPoint bestMove;
+
+        TranspositionEntry()
+            : key(0), score(0), depth(-1), bound(0), bestMove(-1, -1) {}
+    };
+
+    // 搜索
+    int  negamax(int depth, int alpha, int beta, Stone color);
+    int  quiescence(int alpha, int beta, int qdepth, Stone color);
+    int  getDynamicDepth() const;
+    bool hasWinningMove(Stone color, QPoint& move);
+
+    // 着法生成
+    QVector<QPoint> generateOrderedMoves(Stone color, const QPoint& preferredMove = QPoint(-1, -1));
     void getAllCandidateMoves(QVector<QPoint>& candidates);
+
+    // 评估
+    int  evaluateBoardForColor(Stone color);
+    int  evaluatePoint(int r, int c, Stone color);
+    int  evaluateLine(int r, int c, int dr, int dc, Stone color);
+    int  countConsecutive(int r, int c, int dr, int dc, Stone color) const;
+    int  lineMaxConsecutive(int r, int c, Stone color) const;   // [新增] 跨4方向取max
+    bool isWinAt(int r, int c, Stone color) const;              // [新增] 单点连五判定
+
+    // 普通模式
     bool wouldFormFour(int r, int c, Stone color) const;
-    int evaluatePoint(int r, int c, Stone color);
-    int evaluateLine(int r, int c, int dr, int dc, Stone color);
-    int countConsecutive(int r, int c, int dr, int dc, Stone color) const;
 
-    // ==================== 困难模式：Minimax + AB剪枝 ====================
-    int negamax(int depth, int alpha, int beta, Stone color);
-    int quiescenceNegamax(int alpha, int beta, int depth, Stone color);
-    int evaluateBoardForColor(Stone color);
-    QVector<QPoint> generateOrderedMoves(Stone color);
-    int evaluateBoard(Stone perspective);
+    // 禁手
+    bool isForbiddenMove(int r, int c, Stone color) const;
+    bool checkLongConnect(int r, int c, Stone color) const;
+    bool checkDoubleLiveThree(int r, int c, Stone color) const;
+    bool checkDoubleFour(int r, int c, Stone color) const;
 
-    // 棋型模式匹配
-    PatternType detectPattern(int r, int c, int dr, int dc, Stone color) const;
-    int countPattern(int r, int c, Stone color, PatternType pattern) const;
-
-    // 移动排序
-    void updateHistoryTable(const QPoint& move, int depth);
-    QVector<QPoint> getKillerMoves(int depth) const;
-
-    // 动态深度
-    int getDynamicDepth() const;
-
-    // 一步杀检测
-    bool hasWinningMove(Stone color, QPoint& winningMove);
-
+    // 增量候选点管理
+    void makeMove(int r, int c, Stone color);
+    void unmakeMove(int r, int c);
+    void addCandidate(int r, int c);
+    void removeCandidate(int r, int c);
+    void rebuildCandidates();
+    void collectCandidates(QVector<QPoint>& out) const;
+    void invalidateCache(int r, int c);
 private:
     QVector<QVector<Stone>> m_board;
     QVector<QPoint> m_moveHistory;
@@ -124,12 +91,27 @@ private:
     Stone m_enemyColor;
     Difficulty m_difficulty;
 
-    // 历史启发表 (15x15)
     int m_historyTable[BOARD_SIZE][BOARD_SIZE];
-    // 杀手走法表 [depth][2]
     QPoint m_killerTable[64][2];
-    int m_nodesSearched;
-};
+    QVector<TranspositionEntry> m_transpositionTable;
+    quint64 m_zobrist[BOARD_SIZE][BOARD_SIZE][2];
+    quint64 m_positionKey;
 
+    QElapsedTimer m_timer;
+    int m_timeLimitMs;
+    qint64 m_nodesSearched;
+    std::atomic<bool> m_abort;                     // [新增] 超时中断标志
+
+    // ===== 增量候选点数据 =====
+    bool  m_candFlag[BOARD_SIZE][BOARD_SIZE];
+    int   m_candRow[BOARD_SIZE][BOARD_SIZE];
+    int   m_candIndex[BOARD_SIZE][BOARD_SIZE];
+    QVector<QPoint> m_activeCands;
+    int   m_pieceCount;
+
+    // ===== 评估点缓存 =====
+    int  m_ptCache[BOARD_SIZE][BOARD_SIZE][2];
+    bool m_ptCacheValid[BOARD_SIZE][BOARD_SIZE][2];
+};
 
 #endif // GOMOKU_H
