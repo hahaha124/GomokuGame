@@ -13,3 +13,6 @@ HEADERS += \
     CBoardView.h \
     CMainWidget.h \
     gomoku.h
+
+RESOURCES += \
+    img.qrc
